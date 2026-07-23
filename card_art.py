@@ -2,8 +2,8 @@
 """
 Realistic plastic playing-card art for LAN Games.
 
-Drawn procedurally (no copyrighted brand scans): glossy plastic stock,
-beveled edges, corner indices, suit pips, and specular highlights.
+Drawn procedurally (no copyrighted brand scans): clean plastic stock,
+beveled edges, corner indices, and suit pips — no shiny reflection blobs.
 Used by Cribbage (standard 52) and UNO-style color cards.
 """
 
@@ -60,7 +60,7 @@ def _rounded(surf: pygame.Surface, rect: pygame.Rect, color, radius: int = 12):
 
 
 def _plastic_shell(w: int, h: int, face_rgb: Tuple[int, int, int] = (248, 246, 241)) -> pygame.Surface:
-    """Blank glossy plastic card (exactly w x h) with soft shadow and edge bevel."""
+    """Blank clean plastic card (exactly w x h) with soft shadow and edge bevel. No shine blobs."""
     surf = pygame.Surface((w, h), pygame.SRCALPHA)
 
     # Soft multi-layer drop shadow (inside bounds)
@@ -77,27 +77,19 @@ def _plastic_shell(w: int, h: int, face_rgb: Tuple[int, int, int] = (248, 246, 2
     # Mid rim
     _rounded(surf, pygame.Rect(1, 1, w - 3, h - 3), (75, 77, 84), 12)
 
-    # Face fill with vertical gradient (warm white plastic)
+    # Flat face (very mild vertical tint only — no specular)
     _rounded(surf, pygame.Rect(2, 2, w - 5, h - 5), face_rgb, 11)
     for yy in range(4, h - 6):
         t = (yy - 4) / max(1, h - 12)
         col = (
-            _clamp(int(face_rgb[0] - t * 12)),
-            _clamp(int(face_rgb[1] - t * 14)),
-            _clamp(int(face_rgb[2] - t * 16)),
+            _clamp(int(face_rgb[0] - t * 6)),
+            _clamp(int(face_rgb[1] - t * 7)),
+            _clamp(int(face_rgb[2] - t * 8)),
         )
         pygame.draw.line(surf, col, (6, yy), (w - 8, yy))
 
     # Inner hairline
     pygame.draw.rect(surf, (222, 220, 214), pygame.Rect(3, 3, w - 7, h - 7), width=1, border_radius=10)
-
-    # Specular gloss (top-left shine on plastic)
-    gloss = pygame.Surface((w - 12, max(10, h // 3)), pygame.SRCALPHA)
-    gh = gloss.get_height()
-    for yy in range(gh):
-        a = int(65 * (1.0 - yy / max(1, gh - 1)) ** 1.35)
-        pygame.draw.line(gloss, (255, 255, 255, a), (0, yy), (gloss.get_width(), yy))
-    surf.blit(gloss, (5, 5))
 
     return surf
 
@@ -160,7 +152,7 @@ def _pip_positions(rank: int, cx: int, cy: int, dx: int, dy: int) -> List[Tuple[
 
 def render_standard_face(rank: int, suit: str, w: int = STD_W, h: int = STD_H) -> pygame.Surface:
     """Poker-style plastic face card (A–K)."""
-    key = (rank, suit, w, h, "plastic3")
+    key = (rank, suit, w, h, "matte4")
     if key in _face_std:
         return _face_std[key]
 
@@ -179,10 +171,7 @@ def render_standard_face(rank: int, suit: str, w: int = STD_W, h: int = STD_H) -
     font_face = pygame.font.SysFont("Georgia", max(28, int(42 * scale)), bold=True)
 
     if rank in (11, 12, 13):
-        # Face card: large letter on soft plate + suit
-        plate = pygame.Rect(cx - int(22 * scale), cy - int(30 * scale), int(44 * scale), int(60 * scale))
-        pygame.draw.ellipse(card, (255, 255, 255, 100), plate)
-        pygame.draw.ellipse(card, _shade(ink, 0.35, 180), plate, width=2)
+        # Face card: large letter + suit only (no oval plate / reflection)
         letter = {"11": "J", "12": "Q", "13": "K"}[str(rank)]
         L = font_face.render(letter, True, ink)
         card.blit(L, L.get_rect(center=(cx, cy - int(6 * scale))))
@@ -200,19 +189,12 @@ def render_standard_face(rank: int, suit: str, w: int = STD_W, h: int = STD_H) -
             img = fsym.render(sym, True, ink)
             card.blit(img, img.get_rect(center=(px, py)))
 
-    # Final top gloss streak (plastic)
-    streak = pygame.Surface((w - 14, max(6, h // 8)), pygame.SRCALPHA)
-    for yy in range(streak.get_height()):
-        a = int(40 * (1 - yy / max(1, streak.get_height())))
-        pygame.draw.line(streak, (255, 255, 255, a), (0, yy), (streak.get_width(), yy))
-    card.blit(streak, (7, 6))
-
     _face_std[key] = card
     return card
 
 
 def render_standard_back(w: int = STD_W, h: int = STD_H, theme: str = "green") -> pygame.Surface:
-    key = (w, h, theme, "plastic3")
+    key = (w, h, theme, "matte4")
     if key in _back_std:
         return _back_std[key]
 
@@ -221,9 +203,7 @@ def render_standard_back(w: int = STD_W, h: int = STD_H, theme: str = "green") -
     else:
         base, mid, hi = (18, 72, 42), (28, 105, 58), (50, 150, 85)
 
-    surf = _plastic_shell(w, h, face_rgb=(30, 30, 35))
-    card = pygame.Surface((w, h), pygame.SRCALPHA)
-    card.blit(surf, (0, 0))
+    card = _plastic_shell(w, h, face_rgb=(30, 30, 35))
     # Colored back panel
     _rounded(card, pygame.Rect(6, 6, w - 12, h - 12), base, 9)
     _rounded(card, pygame.Rect(10, 10, w - 20, h - 20), mid, 8)
@@ -232,18 +212,10 @@ def render_standard_back(w: int = STD_W, h: int = STD_H, theme: str = "green") -
     for x in range(14, w - 14, step):
         for y in range(14, h - 14, step):
             pygame.draw.circle(card, hi, (x + (y // step % 2) * (step // 2), y), 2)
-    # Center medallion
-    pygame.draw.ellipse(card, _shade(base, 0.7), pygame.Rect(w // 2 - 22, h // 2 - 28, 44, 56))
-    pygame.draw.ellipse(card, (240, 230, 180), pygame.Rect(w // 2 - 18, h // 2 - 24, 36, 48), width=2)
-    font = pygame.font.SysFont("Segoe UI", max(11, w // 7), bold=True)
+    # Center label (flat, no oval medallion glow)
+    font = pygame.font.SysFont("Segoe UI", max(12, w // 7), bold=True)
     t = font.render("LAN", True, (245, 240, 220))
     card.blit(t, t.get_rect(center=(w // 2, h // 2)))
-    # Gloss
-    gloss = pygame.Surface((w - 16, h // 4), pygame.SRCALPHA)
-    for yy in range(gloss.get_height()):
-        a = int(50 * (1 - yy / max(1, gloss.get_height())))
-        pygame.draw.line(gloss, (255, 255, 255, a), (0, yy), (gloss.get_width(), yy))
-    card.blit(gloss, (8, 10))
 
     _back_std[key] = card
     return card
@@ -256,8 +228,8 @@ def render_uno_face(
     w: int = STD_W,
     h: int = STD_H,
 ) -> pygame.Surface:
-    """Plastic color-matching game card (UNO-style original art)."""
-    key = (color, kind, label, w, h, "plastic3")
+    """Plastic color-matching game card (UNO-style original art). No shine blobs."""
+    key = (color, kind, label, w, h, "matte4")
     if key in _face_uno:
         return _face_uno[key]
 
@@ -295,27 +267,20 @@ def render_uno_face(
     oval = pygame.Rect(14, 22, w - 28, h - 44)
 
     if is_wild:
-        # Four glossy color wedges
+        # Four solid color wedges (flat — no white shine badge)
         pygame.draw.ellipse(surf, (30, 30, 35), oval)
         pygame.draw.polygon(surf, UNO_RGB["R"], [(cx, cy), (cx, oval.top + 4), (oval.right - 2, cy)])
         pygame.draw.polygon(surf, UNO_RGB["Y"], [(cx, cy), (cx, oval.top + 4), (oval.left + 2, cy)])
         pygame.draw.polygon(surf, UNO_RGB["G"], [(cx, cy), (cx, oval.bottom - 4), (oval.right - 2, cy)])
         pygame.draw.polygon(surf, UNO_RGB["B"], [(cx, cy), (cx, oval.bottom - 4), (oval.left + 2, cy)])
-        # center white badge
-        badge = pygame.Rect(cx - 20, cy - 24, 40, 48)
-        pygame.draw.ellipse(surf, (250, 248, 244), badge)
-        pygame.draw.ellipse(surf, (200, 200, 205), badge, width=2)
         text_col = (30, 30, 35)
     else:
         col = UNO_RGB.get(color or "R", (180, 40, 40))
-        # Raised plastic oval
-        shadow_oval = oval.move(2, 3)
-        pygame.draw.ellipse(surf, _shade(col, 0.45), shadow_oval)
+        # Flat solid oval — no highlight/reflection ellipse
+        shadow_oval = oval.move(1, 2)
+        pygame.draw.ellipse(surf, _shade(col, 0.5), shadow_oval)
         pygame.draw.ellipse(surf, col, oval)
-        # specular on oval
-        hi = pygame.Rect(oval.x + 10, oval.y + 8, oval.w - 22, oval.h // 3)
-        pygame.draw.ellipse(surf, _shade(col, 1.15, 40), hi)
-        pygame.draw.ellipse(surf, _shade(col, 0.55), oval, width=3)
+        pygame.draw.ellipse(surf, _shade(col, 0.65), oval, width=2)
         text_col = (30, 30, 30) if color == "Y" else (255, 255, 255)
 
     # Center symbol / number with soft emboss
@@ -333,13 +298,16 @@ def render_uno_face(
             pygame.draw.polygon(surf, text_col, [(cx + 16, cy - 12), (cx + 6, cy - 18), (cx + 8, cy - 4)])
             pygame.draw.polygon(surf, text_col, [(cx - 16, cy + 12), (cx - 6, cy + 18), (cx - 8, cy + 4)])
         else:
-            # emboss: dark under, light over, main
             img = font_big.render(label, True, text_col)
             rect = img.get_rect(center=(cx, cy))
-            shadow = font_big.render(label, True, (0, 0, 0, 80) if len(text_col) == 3 else (0, 0, 0))
-            # simple offset shadow
-            sh_img = font_big.render(label, True, _shade(text_col, 0.3))
-            surf.blit(sh_img, (rect.x + 1, rect.y + 2))
+            if is_wild:
+                # flat cream plate behind text (readable, not a shiny reflection)
+                pad = pygame.Rect(rect.x - 8, rect.y - 4, rect.w + 16, rect.h + 8)
+                pygame.draw.rect(surf, (250, 248, 244), pad, border_radius=8)
+                pygame.draw.rect(surf, (180, 180, 185), pad, width=1, border_radius=8)
+            else:
+                sh_img = font_big.render(label, True, _shade(text_col, 0.35))
+                surf.blit(sh_img, (rect.x + 1, rect.y + 1))
             surf.blit(img, rect)
 
     center_symbol()
@@ -368,13 +336,6 @@ def render_uno_face(
     surf.blit(pip, pip.get_rect(center=(16, 18)))
     pip2 = pygame.transform.rotate(pip, 180)
     surf.blit(pip2, pip2.get_rect(center=(w - 16, h - 18)))
-
-    # Glossy plastic sheen
-    gloss = pygame.Surface((w - 14, h // 3), pygame.SRCALPHA)
-    for yy in range(gloss.get_height()):
-        a = int(55 * (1 - yy / max(1, gloss.get_height())) ** 1.3)
-        pygame.draw.line(gloss, (255, 255, 255, a), (0, yy), (gloss.get_width(), yy))
-    surf.blit(gloss, (7, 7))
 
     _face_uno[key] = surf
     return surf
