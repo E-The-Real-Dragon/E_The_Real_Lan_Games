@@ -97,34 +97,27 @@ def _rounded_rect(surf: pygame.Surface, rect: pygame.Rect, color, radius: int = 
 
 
 def render_card_face(card: Card, w: int = CARD_W, h: int = CARD_H) -> pygame.Surface:
-    key = (card.cid, card.color, card.kind, w, h)
+    key = (card.cid, card.color, card.kind, w, h, "v2")
     if key in _face_cache:
         return _face_cache[key]
 
     surf = pygame.Surface((w, h), pygame.SRCALPHA)
-    # Shadow-ish outer dark edge
-    _rounded_rect(surf, pygame.Rect(0, 0, w, h), (20, 20, 25), 12)
-    # White body
-    _rounded_rect(surf, pygame.Rect(2, 2, w - 4, h - 4), (248, 246, 240), 11)
+    # Soft shadow + plastic edge (cleaner than flat 8-bit blocks)
+    sh = pygame.Surface((w, h), pygame.SRCALPHA)
+    _rounded_rect(sh, pygame.Rect(3, 4, w - 3, h - 3), (0, 0, 0), 12)
+    sh.set_alpha(55)
+    surf.blit(sh, (0, 0))
+    _rounded_rect(surf, pygame.Rect(0, 0, w - 1, h - 1), (30, 32, 40), 12)
+    _rounded_rect(surf, pygame.Rect(2, 2, w - 5, h - 5), (250, 248, 242), 11)
+    for yy in range(5, h - 6):
+        t = (yy - 5) / max(1, h - 12)
+        col = (int(250 - t * 8), int(248 - t * 8), int(242 - t * 10))
+        pygame.draw.line(surf, col, (8, yy), (w - 9, yy))
 
     # Color oval / wild multicolor
     cx, cy = w // 2, h // 2
     oval = pygame.Rect(10, 18, w - 20, h - 36)
     if card.is_wild():
-        # Four-color diamond
-        mid_x, mid_y = cx, cy
-        quads = [
-            ((mid_x, 22), (w - 12, mid_y), (mid_x, mid_y), (12, mid_y), COLOR_RGB["R"]),
-            ((mid_x, 22), (w - 12, mid_y), (mid_x, mid_y), (mid_x, mid_y), COLOR_RGB["Y"]),
-        ]
-        # Draw four triangles from center
-        pts = {
-            "R": [(cx, 20), (w - 12, cy), (cx, cy)],
-            "Y": [(cx, 20), (12, cy), (cx, cy)],
-            "G": [(cx, h - 20), (w - 12, cy), (cx, cy)],
-            "B": [(cx, h - 20), (12, cy), (cx, cy)],
-        }
-        # Fix: four proper wedges
         pygame.draw.polygon(surf, COLOR_RGB["R"], [(cx, cy), (cx, 18), (w - 10, cy)])
         pygame.draw.polygon(surf, COLOR_RGB["Y"], [(cx, cy), (cx, 18), (10, cy)])
         pygame.draw.polygon(surf, COLOR_RGB["G"], [(cx, cy), (cx, h - 18), (w - 10, cy)])
@@ -133,9 +126,10 @@ def render_card_face(card: Card, w: int = CARD_W, h: int = CARD_H) -> pygame.Sur
     else:
         col = COLOR_RGB.get(card.color or "R", (180, 180, 180))
         pygame.draw.ellipse(surf, col, oval)
-        # Inner highlight
         hi = pygame.Rect(oval.x + 8, oval.y + 6, oval.w - 16, oval.h // 3)
-        pygame.draw.ellipse(surf, tuple(min(255, c + 40) for c in col), hi)
+        pygame.draw.ellipse(surf, tuple(min(255, c + 45) for c in col), hi)
+        # rim for depth
+        pygame.draw.ellipse(surf, tuple(max(0, c - 40) for c in col), oval, width=2)
 
     # Text
     font_big = pygame.font.SysFont("Segoe UI", max(18, h // 4), bold=True)
@@ -692,6 +686,7 @@ class UnoView:
         bx = WIDTH - 200
         by = HEIGHT // 2 - 80
         for label, bid, col in [
+            ("How to Play", "help", (70, 90, 150)),
             ("UNO!", "uno", (200, 140, 40)),
             ("Catch UNO", "catch", (160, 80, 50)),
             ("Pass", "pass", (70, 90, 120)),
@@ -700,12 +695,17 @@ class UnoView:
             if bid == "pass" and m.drew_this_turn is None:
                 continue
             r = pygame.Rect(bx, by, 170, 40)
-            pygame.draw.rect(screen, col, r, border_radius=8)
+            dark = tuple(max(0, c - 30) for c in col)
+            pygame.draw.rect(screen, dark, r, border_radius=8)
+            pygame.draw.rect(screen, col, r.inflate(-2, -2), border_radius=7)
+            sheen = pygame.Surface((r.w - 4, r.h // 2), pygame.SRCALPHA)
+            sheen.fill((255, 255, 255, 30))
+            screen.blit(sheen, (r.x + 2, r.y + 2))
             pygame.draw.rect(screen, (20, 20, 20), r, 2, border_radius=8)
             t = f["med"].render(label, True, (255, 255, 255))
             screen.blit(t, t.get_rect(center=r.center))
             self.button_rects.append((r, bid))
-            by += 52
+            by += 48
 
         # Color picker overlay
         self.color_rects = []

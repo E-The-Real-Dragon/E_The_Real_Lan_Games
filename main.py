@@ -19,6 +19,7 @@ from typing import Optional, Tuple, List, Dict, Any
 
 import uno_game
 import cribbage_game
+import help_ui
 
 # ----------------------------- CONFIG -----------------------------
 WIDTH, HEIGHT = 920, 720
@@ -245,9 +246,17 @@ def draw_text(surf: pygame.Surface, font: pygame.font.Font, text: str, x: int, y
 
 def draw_button(surf: pygame.Surface, font: pygame.font.Font, rect: pygame.Rect, text: str,
                 bg=(70, 95, 140), fg=WHITE, hover=False):
-    col = tuple(min(255, c + 25) for c in bg) if hover else bg
-    pygame.draw.rect(surf, col, rect, border_radius=8)
-    pygame.draw.rect(surf, (20, 20, 20), rect, width=2, border_radius=8)
+    """Slightly richer button (gradient + highlight) for a cleaner 16-bit UI feel."""
+    col = tuple(min(255, c + 28) for c in bg) if hover else bg
+    dark = tuple(max(0, c - 35) for c in col)
+    pygame.draw.rect(surf, dark, rect, border_radius=8)
+    inner = rect.inflate(-2, -2)
+    pygame.draw.rect(surf, col, inner, border_radius=7)
+    # top sheen
+    sheen = pygame.Surface((max(1, inner.w), max(1, inner.h // 2)), pygame.SRCALPHA)
+    sheen.fill((255, 255, 255, 28))
+    surf.blit(sheen, (inner.x, inner.y))
+    pygame.draw.rect(surf, (15, 15, 18), rect, width=2, border_radius=8)
     draw_text(surf, font, text, rect.centerx, rect.centery, fg, center=True)
 
 def draw_color_swatch(surf: pygame.Surface, x: int, y: int, size: int, rgb: Tuple[int, int, int],
@@ -349,6 +358,9 @@ def main():
     # Cribbage match state
     crib_match: Optional[cribbage_game.CribbageMatch] = None
     crib_view: Optional[cribbage_game.CribbageView] = None
+
+    # Scrollable FAQ / How-to-Play overlay
+    help_panel = help_ui.HelpOverlay()
 
     buttons: List[Tuple[pygame.Rect, str]] = []  # (rect, id) for current screen
     game_selections: List[Tuple[pygame.Rect, Optional[str]]] = []  # (rect, game_id) populated by draw_main_menu
@@ -911,15 +923,35 @@ def main():
         draw_button(screen, font_big, join_rect, "Join Game", (55, 90, 140))
         buttons.append((join_rect, "join"))
 
-        y += 68
+        y += 58
+
+        # Instructions for selected game
+        how_enabled = selected_game in PLAYABLE_GAMES
+        how_bg = (90, 75, 140) if how_enabled else (60, 58, 70)
+        how_label = "How to Play / FAQ"
+        if selected_game in PLAYABLE_GAMES:
+            labels = {"checkers": "Checkers", "uno": "UNO", "cribbage": "Cribbage"}
+            how_label = f"{labels.get(selected_game, 'Game')} Instructions"
+        how_rect = pygame.Rect(action_x, y, bw, 46)
+        draw_button(screen, font_med, how_rect, how_label, how_bg)
+        buttons.append((how_rect, "help_game"))
+
+        y += 52
+
+        # General LAN FAQ
+        faq_rect = pygame.Rect(action_x, y, bw, 46)
+        draw_button(screen, font_med, faq_rect, "LAN FAQ (connect help)", (70, 85, 110))
+        buttons.append((faq_rect, "help_lan"))
+
+        y += 52
 
         # Quit
-        quit_rect = pygame.Rect(action_x, y, bw, bh)
+        quit_rect = pygame.Rect(action_x, y, bw, 46)
         draw_button(screen, font_big, quit_rect, "Quit", (120, 55, 55))
         buttons.append((quit_rect, "quit"))
 
         # Helpful footer
-        draw_text(screen, font_small, "Click a game on the left to select it.", WIDTH // 2, HEIGHT - 92, (155, 155, 160), center=True)
+        draw_text(screen, font_small, "Click a game on the left, then Host / Join — or open Instructions (scrollable).", WIDTH // 2, HEIGHT - 92, (155, 155, 160), center=True)
         draw_text(screen, font_small, "Checkers, UNO, and Cribbage are ready for LAN play. More games coming soon!", WIDTH // 2, HEIGHT - 70, (130, 130, 135), center=True)
 
         if last_net_error:
@@ -1133,17 +1165,20 @@ def main():
         if is_my_turn() and selected is not None and (jump_chain_active or not force_jumps):
             draw_text(screen, font_small, "More jumps available — click a green or End Turn", BOARD_X + BOARD_PX + 140, yb + 112, (255, 200, 120), center=True)
 
-        # Menu button
+        # Menu / help buttons
         bw, bh = 160, 40
         mrect = pygame.Rect(BOARD_X + BOARD_PX + 55, HEIGHT - 120, bw, bh)
         draw_button(screen, font_med, mrect, "Main Menu", (130, 70, 70))
         nonlocal buttons
         buttons = [(mrect, "menu")]
+        hrect = pygame.Rect(BOARD_X + BOARD_PX + 55, HEIGHT - 170, bw, bh)
+        draw_button(screen, font_med, hrect, "How to Play", (70, 90, 150))
+        buttons.append((hrect, "help"))
 
         # End Turn button (only during jump continuation on your turn) — use this to stop
         # after a jump (incl. one that promoted to king) instead of being forced to continue.
         if is_my_turn() and selected is not None and (jump_chain_active or not force_jumps):
-            et_rect = pygame.Rect(BOARD_X + BOARD_PX + 55, HEIGHT - 170, bw, bh)
+            et_rect = pygame.Rect(BOARD_X + BOARD_PX + 55, HEIGHT - 220, bw, bh)
             draw_button(screen, font_med, et_rect, "End Turn (skip jumps)", (200, 140, 40))
             buttons.append((et_rect, "end_turn"))
 
@@ -1191,6 +1226,11 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
 
+            # Scrollable FAQ / instructions captures input while open
+            if help_panel.open:
+                if help_panel.handle_event(event):
+                    continue
+
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 # Click handling per screen
                 if screen_name == "main_menu":
@@ -1212,6 +1252,13 @@ def main():
                             elif bid == "join":
                                 screen_name = "join_setup"
                                 input_active = False
+                            elif bid == "help_game":
+                                if selected_game in PLAYABLE_GAMES:
+                                    help_panel.show(selected_game)
+                                else:
+                                    last_net_error = "Select Checkers, UNO, or Cribbage for instructions"
+                            elif bid == "help_lan":
+                                help_panel.show("lan")
                             elif bid == "quit":
                                 running = False
 
@@ -1269,6 +1316,8 @@ def main():
                                 cleanup_net()
                                 screen_name = "main_menu"
                                 reset_game_state()
+                            elif action.get("action") == "help":
+                                help_panel.show("uno")
                             elif is_host:
                                 apply_uno_action(my_player, action)
                             else:
@@ -1283,6 +1332,8 @@ def main():
                                 cleanup_net()
                                 screen_name = "main_menu"
                                 reset_game_state()
+                            elif action.get("action") == "help":
+                                help_panel.show("cribbage")
                             elif is_host:
                                 apply_crib_action(my_player, action)
                             else:
@@ -1297,6 +1348,8 @@ def main():
                                     cleanup_net()
                                     screen_name = "main_menu"
                                     reset_game_state()
+                                elif bid == "help":
+                                    help_panel.show("checkers")
                                 elif bid == "end_turn":
                                     if is_my_turn() and selected is not None and (jump_chain_active or not force_jumps):
                                         end_turn_sequence()
@@ -1423,11 +1476,8 @@ def main():
             else:
                 draw_gameover_screen()
 
-        # Hover effect for buttons (simple visual)
-        for rect, _ in buttons:
-            if rect.collidepoint(mx, my):
-                # re-draw slightly brighter? but draw already handles in some, skip complex
-                pass
+        # Scrollable FAQ / instructions on top of everything
+        help_panel.draw(screen)
 
         pygame.display.flip()
         clock.tick(FPS)

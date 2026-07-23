@@ -228,33 +228,53 @@ def _rounded(surf, rect, color, radius=10):
 
 
 def render_card_face(card: Card, w: int = CARD_W, h: int = CARD_H) -> pygame.Surface:
-    key = (card.cid, card.rank, card.suit, w, h)
+    """Hi-res-ish card face: soft plastic look (not chunky 8-bit blocks)."""
+    key = (card.cid, card.rank, card.suit, w, h, "v2")
     if key in _face_cache:
         return _face_cache[key]
     surf = pygame.Surface((w, h), pygame.SRCALPHA)
-    _rounded(surf, pygame.Rect(0, 0, w, h), (15, 15, 18), 10)
-    _rounded(surf, pygame.Rect(2, 2, w - 4, h - 4), (250, 248, 242), 9)
-    ink = (200, 35, 45) if card.is_red() else (25, 25, 30)
-    font_r = pygame.font.SysFont("Segoe UI", max(16, h // 5), bold=True)
-    font_s = pygame.font.SysFont("Segoe UI", max(18, h // 4), bold=True)
+    # Soft drop shadow
+    sh = pygame.Surface((w, h), pygame.SRCALPHA)
+    _rounded(sh, pygame.Rect(3, 4, w - 4, h - 4), (0, 0, 0, 70), 11)
+    surf.blit(sh, (0, 0))
+    _rounded(surf, pygame.Rect(0, 0, w - 2, h - 2), (22, 24, 30), 11)
+    # Cream face with slight vertical gradient
+    face = pygame.Surface((w - 6, h - 6), pygame.SRCALPHA)
+    for yy in range(h - 6):
+        t = yy / max(1, h - 7)
+        r = int(252 - t * 8)
+        g = int(250 - t * 10)
+        b = int(244 - t * 12)
+        pygame.draw.line(face, (r, g, b), (0, yy), (w - 6, yy))
+    surf.blit(face, (2, 2))
+    # clip corners by redrawing border radius overlay — approximate with rounded mask stroke
+    _rounded(surf, pygame.Rect(2, 2, w - 6, h - 6), (0, 0, 0, 0), 9)
+    pygame.draw.rect(surf, (235, 232, 225), pygame.Rect(2, 2, w - 6, h - 6), width=1, border_radius=9)
+
+    ink = (190, 32, 42) if card.is_red() else (28, 30, 38)
+    font_r = pygame.font.SysFont("Segoe UI", max(15, h // 5), bold=True)
+    font_s = pygame.font.SysFont("Segoe UI", max(16, h // 4), bold=True)
     pip = card.pip()
     sym = SUIT_SYM[card.suit]
     t1 = font_r.render(pip, True, ink)
     t2 = font_s.render(sym, True, ink)
-    surf.blit(t1, (7, 4))
-    surf.blit(t2, (7, 4 + t1.get_height() - 2))
-    # center suit
-    big = pygame.font.SysFont("Segoe UI", max(28, h // 3), bold=True)
+    surf.blit(t1, (8, 5))
+    surf.blit(t2, (8, 5 + t1.get_height() - 2))
+    big = pygame.font.SysFont("Segoe UI", max(30, h // 3), bold=True)
     ct = big.render(sym, True, ink)
-    surf.blit(ct, ct.get_rect(center=(w // 2, h // 2 + 4)))
-    # bottom inverted
+    # soft center plate
+    plate = pygame.Rect(w // 2 - 18, h // 2 - 22, 36, 44)
+    pygame.draw.ellipse(surf, (255, 255, 255, 90), plate)
+    surf.blit(ct, ct.get_rect(center=(w // 2, h // 2 + 2)))
     t1b = pygame.transform.rotate(t1, 180)
     t2b = pygame.transform.rotate(t2, 180)
-    surf.blit(t1b, (w - t1b.get_width() - 7, h - t1b.get_height() - 4))
-    surf.blit(t2b, (w - t2b.get_width() - 7, h - t1b.get_height() - t2b.get_height() - 2))
-    gloss = pygame.Surface((w - 8, h // 5), pygame.SRCALPHA)
-    gloss.fill((255, 255, 255, 40))
-    surf.blit(gloss, (4, 5))
+    surf.blit(t1b, (w - t1b.get_width() - 10, h - t1b.get_height() - 6))
+    surf.blit(t2b, (w - t2b.get_width() - 10, h - t1b.get_height() - t2b.get_height() - 4))
+    gloss = pygame.Surface((w - 12, max(8, h // 4)), pygame.SRCALPHA)
+    for yy in range(gloss.get_height()):
+        a = int(55 * (1 - yy / max(1, gloss.get_height())))
+        pygame.draw.line(gloss, (255, 255, 255, a), (0, yy), (gloss.get_width(), yy))
+    surf.blit(gloss, (5, 4))
     _face_cache[key] = surf
     return surf
 
@@ -861,7 +881,10 @@ class CribbageView:
         # Buttons
         self.button_rects = []
         bx, by = WIDTH - 190, 400
-        buttons = [("Main Menu", "menu", (120, 55, 55))]
+        buttons = [
+            ("How to Play", "help", (70, 90, 150)),
+            ("Main Menu", "menu", (120, 55, 55)),
+        ]
         if m.phase == "discard" and not m.discards_done[self.my_player]:
             buttons.insert(0, ("Confirm 2 to Crib", "confirm_discard", (50, 130, 80)))
         if m.phase == "peg" and m.peg_turn == self.my_player and not m.legal_peg_cards(self.my_player):
@@ -873,7 +896,12 @@ class CribbageView:
 
         for label, bid, col in buttons:
             r = pygame.Rect(bx, by, 170, 40)
-            pygame.draw.rect(screen, col, r, border_radius=8)
+            dark = tuple(max(0, c - 30) for c in col)
+            pygame.draw.rect(screen, dark, r, border_radius=8)
+            pygame.draw.rect(screen, col, r.inflate(-2, -2), border_radius=7)
+            sheen = pygame.Surface((r.w - 4, r.h // 2), pygame.SRCALPHA)
+            sheen.fill((255, 255, 255, 30))
+            screen.blit(sheen, (r.x + 2, r.y + 2))
             pygame.draw.rect(screen, (15, 15, 15), r, 2, border_radius=8)
             t = f["med"].render(label, True, (255, 255, 255))
             screen.blit(t, t.get_rect(center=r.center))
