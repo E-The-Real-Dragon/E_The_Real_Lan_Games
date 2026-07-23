@@ -2,8 +2,8 @@
 """
 E The Real LAN Games — household multiplayer games over local Wi-Fi.
 
-Currently includes LAN Checkers (host-authoritative multiplayer).
-More games (UNO, Chess, etc.) can be added via the in-app game picker.
+Currently includes LAN Checkers, UNO, and Cribbage (host-authoritative multiplayer).
+More games can be added via the in-app game picker.
 
 Checkers: click a piece, then a highlighted square. Only legal moves.
 Realistic pieces with crowns for kings. Custom colors + optional mandatory jumps.
@@ -18,6 +18,7 @@ import sys
 from typing import Optional, Tuple, List, Dict, Any
 
 import uno_game
+import cribbage_game
 
 # ----------------------------- CONFIG -----------------------------
 WIDTH, HEIGHT = 920, 720
@@ -52,13 +53,14 @@ PALETTE: List[Tuple[str, Tuple[int, int, int]]] = [
 AVAILABLE_GAMES: List[Dict[str, Any]] = [
     {"id": "checkers", "label": "Checkers", "enabled": True},
     {"id": "uno", "label": "UNO", "enabled": True},
+    {"id": "cribbage", "label": "Cribbage", "enabled": True},
     {"id": "chess", "label": "Chess", "enabled": False},
     {"id": "othello", "label": "Othello", "enabled": False},
     {"id": "tic_tac_toe", "label": "Tic Tac Toe", "enabled": False},
     {"id": None, "label": "More to come...", "enabled": False},
 ]
 
-PLAYABLE_GAMES = {"checkers", "uno"}
+PLAYABLE_GAMES = {"checkers", "uno", "cribbage"}
 
 # ----------------------------- GAME LOGIC -----------------------------
 def new_board() -> List[List[Optional[Tuple[int, bool]]]]:
@@ -338,18 +340,22 @@ def main():
     checkbox_rect = pygame.Rect(0, 0, 0, 0)
     input_active = False
 
-    selected_game = "checkers"  # "checkers" or "uno" (and future games)
+    selected_game = "checkers"  # checkers | uno | cribbage | ...
 
     # UNO match state (host is authoritative; client mirrors snapshots)
     uno_match: Optional[uno_game.UnoMatch] = None
     uno_view: Optional[uno_game.UnoView] = None
+
+    # Cribbage match state
+    crib_match: Optional[cribbage_game.CribbageMatch] = None
+    crib_view: Optional[cribbage_game.CribbageView] = None
 
     buttons: List[Tuple[pygame.Rect, str]] = []  # (rect, id) for current screen
     game_selections: List[Tuple[pygame.Rect, Optional[str]]] = []  # (rect, game_id) populated by draw_main_menu
 
     def reset_game_state():
         nonlocal board, selected, legal_actions, jump_chain_active, current_player, winner
-        nonlocal uno_match, uno_view
+        nonlocal uno_match, uno_view, crib_match, crib_view
         board = new_board()
         selected = None
         legal_actions = []
@@ -358,6 +364,8 @@ def main():
         winner = None
         uno_match = None
         uno_view = None
+        crib_match = None
+        crib_view = None
 
     def start_uno_match_host():
         nonlocal uno_match, uno_view, winner
@@ -391,6 +399,39 @@ def main():
                 if sock:
                     send_msg(sock, {"type": "game_over", "winner": winner, "game": "uno"})
             push_uno_states()
+        return changed
+
+    def start_crib_match_host():
+        nonlocal crib_match, crib_view, winner
+        crib_match = cribbage_game.CribbageMatch()
+        crib_match.start_match()
+        crib_view = cribbage_game.CribbageView(match=crib_match, my_player=0, is_host=True)
+        winner = None
+
+    def push_crib_states():
+        nonlocal winner, screen_name
+        if not is_host or crib_match is None:
+            return
+        if crib_match.winner is not None:
+            winner = crib_match.winner
+            screen_name = "gameover"
+        if sock:
+            send_msg(sock, crib_match.state_for(1))
+
+    def apply_crib_action(player: int, action: Dict[str, Any]) -> bool:
+        nonlocal winner, screen_name
+        if crib_match is None or not is_host:
+            return False
+        if action.get("action") == "menu":
+            return False
+        changed = cribbage_game.process_host_action(crib_match, player, action)
+        if changed:
+            if crib_match.winner is not None:
+                winner = crib_match.winner
+                screen_name = "gameover"
+                if sock:
+                    send_msg(sock, {"type": "game_over", "winner": winner, "game": "cribbage"})
+            push_crib_states()
         return changed
 
     def start_hosting():
@@ -435,7 +476,7 @@ def main():
 
     def on_client_connected():
         nonlocal screen_name, sock, is_host, my_player, colors, force_jumps
-        nonlocal uno_match, uno_view, selected_game
+        nonlocal uno_match, uno_view, crib_match, crib_view, selected_game
         # Client just connected to us (host)
         if is_host and sock is None:
             # accept happened in loop
@@ -451,6 +492,17 @@ def main():
                 }
                 send_msg(sock, payload)
                 push_uno_states()
+            return
+        if selected_game == "cribbage":
+            start_crib_match_host()
+            if is_host and sock:
+                payload = {
+                    "type": "settings",
+                    "game": "cribbage",
+                    "you_are": 1,
+                }
+                send_msg(sock, payload)
+                push_crib_states()
             return
 
         reset_game_state()
@@ -469,7 +521,7 @@ def main():
 
     def on_settings_received(msg: Dict):
         nonlocal colors, force_jumps, my_player, screen_name, selected_game
-        nonlocal uno_match, uno_view
+        nonlocal uno_match, uno_view, crib_match, crib_view
         selected_game = msg.get("game", "checkers")
         my_player = msg.get("you_are", 1)
         screen_name = "playing"
@@ -478,6 +530,10 @@ def main():
             uno_match = uno_game.UnoMatch()
             uno_view = uno_game.UnoView(match=uno_match, my_player=my_player, is_host=False)
             # Full snapshot arrives as uno_state right after settings
+            return
+        if selected_game == "cribbage":
+            crib_match = cribbage_game.CribbageMatch()
+            crib_view = cribbage_game.CribbageView(match=crib_match, my_player=my_player, is_host=False)
             return
 
         cols = msg.get("colors", {})
@@ -608,7 +664,7 @@ def main():
 
     def handle_net_message(msg: Dict[str, Any]):
         nonlocal sock, server_sock, screen_name, winner, last_net_error, current_player, selected, legal_actions
-        nonlocal uno_match, uno_view, selected_game
+        nonlocal uno_match, uno_view, crib_match, crib_view, selected_game
         mtype = msg.get("type")
         if mtype == "settings":
             on_settings_received(msg)
@@ -624,6 +680,17 @@ def main():
             # Client -> host action request
             if is_host and uno_match is not None:
                 apply_uno_action(1, msg)
+        elif mtype == "crib_state":
+            if crib_view is None:
+                crib_match = cribbage_game.CribbageMatch()
+                crib_view = cribbage_game.CribbageView(match=crib_match, my_player=my_player, is_host=is_host)
+            crib_view.sync_from_state_msg(msg)
+            if msg.get("winner") is not None:
+                winner = msg.get("winner")
+                screen_name = "gameover"
+        elif mtype == "crib_action":
+            if is_host and crib_match is not None:
+                apply_crib_action(1, msg)
         elif mtype == "move":
             fr = tuple(msg.get("from", [0, 0]))
             to = tuple(msg.get("to", [0, 0]))
@@ -683,6 +750,8 @@ def main():
             screen_name = "gameover"
             if uno_match is not None:
                 uno_match.winner = winner
+            if crib_match is not None:
+                crib_match.winner = winner
 
     def poll_network():
         nonlocal sock, server_sock, connecting, last_net_error, screen_name, net_buffer
@@ -820,11 +889,11 @@ def main():
 
         # Selection status
         if selected_game in PLAYABLE_GAMES:
-            labels = {"checkers": "Checkers", "uno": "UNO"}
+            labels = {"checkers": "Checkers", "uno": "UNO", "cribbage": "Cribbage"}
             status = f"{labels.get(selected_game, selected_game)} selected — full LAN support"
             status_col = (70, 200, 110)
         else:
-            status = "That game is not ready yet — pick Checkers or UNO"
+            status = "That game is not ready yet — pick Checkers, UNO, or Cribbage"
             status_col = (200, 190, 100)
         draw_text(screen, font_med, status, action_x, y - 18, status_col)
 
@@ -851,7 +920,7 @@ def main():
 
         # Helpful footer
         draw_text(screen, font_small, "Click a game on the left to select it.", WIDTH // 2, HEIGHT - 92, (155, 155, 160), center=True)
-        draw_text(screen, font_small, "Checkers and UNO are ready for LAN play. More games coming soon!", WIDTH // 2, HEIGHT - 70, (130, 130, 135), center=True)
+        draw_text(screen, font_small, "Checkers, UNO, and Cribbage are ready for LAN play. More games coming soon!", WIDTH // 2, HEIGHT - 70, (130, 130, 135), center=True)
 
         if last_net_error:
             draw_text(screen, font_small, last_net_error, WIDTH // 2, HEIGHT - 42, (220, 90, 90), center=True)
@@ -891,6 +960,30 @@ def main():
             buttons.append((back_rect, "back"))
             if last_net_error:
                 draw_text(screen, font_small, last_net_error, WIDTH // 2, 580, (220, 80, 80), center=True)
+            return
+
+        if selected_game == "cribbage":
+            draw_text(screen, font_big, "LAN CRIBBAGE — 2 players", WIDTH // 2, 170, WHITE, center=True)
+            lines = [
+                "Race to 121. Host is first dealer.",
+                "Each gets 6 cards — discard 2 to the crib.",
+                "Pegging: play cards up to 31 (pairs, runs, 15s).",
+                "Then score hands + crib (the show).",
+                "Private hands until the show. Host is rules authority.",
+            ]
+            yy = 220
+            for line in lines:
+                draw_text(screen, font_med, line, WIDTH // 2, yy, (190, 195, 200), center=True)
+                yy += 32
+            bw, bh = 260, 50
+            start_rect = pygame.Rect((WIDTH - bw) // 2, 420, bw, bh)
+            draw_button(screen, font_big, start_rect, "Start Hosting", (40, 130, 70))
+            buttons.append((start_rect, "start_host"))
+            back_rect = pygame.Rect((WIDTH - bw) // 2, 490, bw, bh)
+            draw_button(screen, font_big, back_rect, "Back", (90, 90, 95))
+            buttons.append((back_rect, "back"))
+            if last_net_error:
+                draw_text(screen, font_small, last_net_error, WIDTH // 2, 570, (220, 80, 80), center=True)
             return
 
         # Color pickers (Checkers)
@@ -1115,7 +1208,7 @@ def main():
                                 if selected_game in PLAYABLE_GAMES:
                                     screen_name = "host_setup"
                                 else:
-                                    last_net_error = "Select Checkers or UNO to host (other games coming soon)"
+                                    last_net_error = "Select Checkers, UNO, or Cribbage to host"
                             elif bid == "join":
                                 screen_name = "join_setup"
                                 input_active = False
@@ -1183,6 +1276,20 @@ def main():
                                     payload = dict(action)
                                     payload["type"] = "uno_action"
                                     send_msg(sock, payload)
+                    elif selected_game == "cribbage" and crib_view is not None:
+                        action = crib_view.handle_mouse_down((mx, my))
+                        if action:
+                            if action.get("action") == "menu":
+                                cleanup_net()
+                                screen_name = "main_menu"
+                                reset_game_state()
+                            elif is_host:
+                                apply_crib_action(my_player, action)
+                            else:
+                                if sock:
+                                    payload = dict(action)
+                                    payload["type"] = "crib_action"
+                                    send_msg(sock, payload)
                     else:
                         for rect, bid in buttons:
                             if rect.collidepoint(mx, my):
@@ -1228,6 +1335,16 @@ def main():
                                 payload = dict(action)
                                 payload["type"] = "uno_action"
                                 send_msg(sock, payload)
+                elif screen_name == "playing" and selected_game == "cribbage" and crib_view is not None:
+                    action = crib_view.handle_mouse_up((mx, my))
+                    if action:
+                        if is_host:
+                            apply_crib_action(my_player, action)
+                        else:
+                            if sock:
+                                payload = dict(action)
+                                payload["type"] = "crib_action"
+                                send_msg(sock, payload)
 
             elif event.type == pygame.KEYDOWN:
                 if screen_name == "join_setup" and input_active:
@@ -1245,6 +1362,8 @@ def main():
             elif event.type == pygame.MOUSEMOTION:
                 if screen_name == "playing" and selected_game == "uno" and uno_view is not None:
                     uno_view.handle_mouse_motion((mx, my))
+                elif screen_name == "playing" and selected_game == "cribbage" and crib_view is not None:
+                    crib_view.handle_mouse_motion((mx, my))
 
         # Network polling every frame
         poll_network()
@@ -1272,12 +1391,22 @@ def main():
             elif selected_game == "uno":
                 screen.fill((28, 70, 48))
                 draw_text(screen, font_big, "Starting UNO...", WIDTH // 2, HEIGHT // 2, WHITE, center=True)
+            elif selected_game == "cribbage" and crib_view is not None:
+                crib_view.draw(screen)
+            elif selected_game == "cribbage":
+                screen.fill((25, 55, 40))
+                draw_text(screen, font_big, "Starting Cribbage...", WIDTH // 2, HEIGHT // 2, WHITE, center=True)
             else:
                 draw_play_screen()
         elif screen_name == "gameover":
-            if selected_game == "uno" and uno_view is not None:
-                uno_view.draw(screen)
-                # Overlay win buttons (reuse checkers gameover buttons layout lightly)
+            if selected_game in ("uno", "cribbage") and (
+                (selected_game == "uno" and uno_view is not None)
+                or (selected_game == "cribbage" and crib_view is not None)
+            ):
+                if selected_game == "uno" and uno_view is not None:
+                    uno_view.draw(screen)
+                elif crib_view is not None:
+                    crib_view.draw(screen)
                 ov = pygame.Rect(WIDTH // 2 - 200, 140, 400, 200)
                 pygame.draw.rect(screen, (35, 38, 45), ov, border_radius=12)
                 pygame.draw.rect(screen, (80, 80, 90), ov, width=2, border_radius=12)

@@ -11,6 +11,7 @@ No internet required after install. Host on one PC, join from another on the sam
 |------|--------|
 | **Checkers** | Fully playable over LAN |
 | **UNO** | Fully playable over LAN (private hands, drag-to-play) |
+| **Cribbage** | Fully playable over LAN (2-player, race to 121) |
 | Chess | Coming soon |
 | Othello | Coming soon |
 | Tic Tac Toe | Coming soon |
@@ -24,6 +25,16 @@ No internet required after install. Host on one PC, join from another on the sam
 5. Or **click DRAW** to take a card (if playable, you may play it or press **Pass**).
 6. After a Wild / Wild +4, pick a color on the overlay.
 7. Press **UNO!** when you have one card. Opponent can press **Catch UNO** if you forget.
+
+### Cribbage how to play
+
+1. Host selects **Cribbage** → Host Game → Start Hosting.
+2. Guest joins with the host IP.
+3. **Discard:** each player is dealt 6 cards — click 2 (gold outline) then **Confirm 2 to Crib**.
+4. **Pegging:** play cards (click or drag) so the running count stays ≤ 31. Score 15s, pairs, runs, 31, and go.
+5. **The show:** press **Next Score** to score non-dealer hand, dealer hand, then crib.
+6. **Next Hand** switches dealer. First to **121** wins.
+7. Hands stay private until the show. Crib stays face-down until scored.
 
 ## How to play (desktop .exe)
 
@@ -95,6 +106,7 @@ Output appears under `dist/E_The_Real_Lan_Games/`. Copy that whole folder to the
 E_The_Real_Lan_Games/
   main.py                      # App hub + Checkers + LAN networking
   uno_game.py                  # UNO rules, private hands, card art, drag-drop UI
+  cribbage_game.py             # Cribbage rules, pegging, show scoring, UI
   requirements.txt
   E_The_Real_Lan_Games.spec    # PyInstaller recipe
   README.md
