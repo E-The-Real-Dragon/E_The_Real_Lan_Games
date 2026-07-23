@@ -36,3 +36,7 @@ desktop.ini
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Local previews
+_card_preview.png
+_*.png

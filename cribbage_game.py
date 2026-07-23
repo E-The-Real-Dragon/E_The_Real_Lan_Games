@@ -16,27 +16,15 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pygame
 
+import card_art
+
 WIDTH, HEIGHT = 920, 720
-CARD_W, CARD_H = 70, 106
-CARD_W_SM, CARD_H_SM = 50, 76
+CARD_W, CARD_H = card_art.STD_W, card_art.STD_H
+CARD_W_SM, CARD_H_SM = card_art.SM_W, card_art.SM_H
 
 SUITS = ("S", "H", "D", "C")  # spades hearts diamonds clubs
-SUIT_SYM = {"S": "♠", "H": "♥", "D": "♦", "C": "♣"}
-RANK_NAME = {
-    1: "A",
-    2: "2",
-    3: "3",
-    4: "4",
-    5: "5",
-    6: "6",
-    7: "7",
-    8: "8",
-    9: "9",
-    10: "10",
-    11: "J",
-    12: "Q",
-    13: "K",
-}
+SUIT_SYM = card_art.SUIT_SYM
+RANK_NAME = card_art.RANK_PIP
 WIN_SCORE = 121
 
 
@@ -218,80 +206,13 @@ def peg_pair_points(played: List[Card]) -> int:
     return 0
 
 
-# ---- Card art ----
-_face_cache: Dict[Tuple[Any, ...], pygame.Surface] = {}
-_back_cache: Dict[Tuple[int, int], pygame.Surface] = {}
-
-
-def _rounded(surf, rect, color, radius=10):
-    pygame.draw.rect(surf, color, rect, border_radius=radius)
-
-
 def render_card_face(card: Card, w: int = CARD_W, h: int = CARD_H) -> pygame.Surface:
-    """Hi-res-ish card face: soft plastic look (not chunky 8-bit blocks)."""
-    key = (card.cid, card.rank, card.suit, w, h, "v2")
-    if key in _face_cache:
-        return _face_cache[key]
-    surf = pygame.Surface((w, h), pygame.SRCALPHA)
-    # Soft drop shadow
-    sh = pygame.Surface((w, h), pygame.SRCALPHA)
-    _rounded(sh, pygame.Rect(3, 4, w - 4, h - 4), (0, 0, 0, 70), 11)
-    surf.blit(sh, (0, 0))
-    _rounded(surf, pygame.Rect(0, 0, w - 2, h - 2), (22, 24, 30), 11)
-    # Cream face with slight vertical gradient
-    face = pygame.Surface((w - 6, h - 6), pygame.SRCALPHA)
-    for yy in range(h - 6):
-        t = yy / max(1, h - 7)
-        r = int(252 - t * 8)
-        g = int(250 - t * 10)
-        b = int(244 - t * 12)
-        pygame.draw.line(face, (r, g, b), (0, yy), (w - 6, yy))
-    surf.blit(face, (2, 2))
-    # clip corners by redrawing border radius overlay — approximate with rounded mask stroke
-    _rounded(surf, pygame.Rect(2, 2, w - 6, h - 6), (0, 0, 0, 0), 9)
-    pygame.draw.rect(surf, (235, 232, 225), pygame.Rect(2, 2, w - 6, h - 6), width=1, border_radius=9)
-
-    ink = (190, 32, 42) if card.is_red() else (28, 30, 38)
-    font_r = pygame.font.SysFont("Segoe UI", max(15, h // 5), bold=True)
-    font_s = pygame.font.SysFont("Segoe UI", max(16, h // 4), bold=True)
-    pip = card.pip()
-    sym = SUIT_SYM[card.suit]
-    t1 = font_r.render(pip, True, ink)
-    t2 = font_s.render(sym, True, ink)
-    surf.blit(t1, (8, 5))
-    surf.blit(t2, (8, 5 + t1.get_height() - 2))
-    big = pygame.font.SysFont("Segoe UI", max(30, h // 3), bold=True)
-    ct = big.render(sym, True, ink)
-    # soft center plate
-    plate = pygame.Rect(w // 2 - 18, h // 2 - 22, 36, 44)
-    pygame.draw.ellipse(surf, (255, 255, 255, 90), plate)
-    surf.blit(ct, ct.get_rect(center=(w // 2, h // 2 + 2)))
-    t1b = pygame.transform.rotate(t1, 180)
-    t2b = pygame.transform.rotate(t2, 180)
-    surf.blit(t1b, (w - t1b.get_width() - 10, h - t1b.get_height() - 6))
-    surf.blit(t2b, (w - t2b.get_width() - 10, h - t1b.get_height() - t2b.get_height() - 4))
-    gloss = pygame.Surface((w - 12, max(8, h // 4)), pygame.SRCALPHA)
-    for yy in range(gloss.get_height()):
-        a = int(55 * (1 - yy / max(1, gloss.get_height())))
-        pygame.draw.line(gloss, (255, 255, 255, a), (0, yy), (gloss.get_width(), yy))
-    surf.blit(gloss, (5, 4))
-    _face_cache[key] = surf
-    return surf
+    """Realistic glossy plastic poker-style card."""
+    return card_art.render_standard_face(card.rank, card.suit, w, h)
 
 
 def render_card_back(w: int = CARD_W, h: int = CARD_H) -> pygame.Surface:
-    key = (w, h)
-    if key in _back_cache:
-        return _back_cache[key]
-    surf = pygame.Surface((w, h), pygame.SRCALPHA)
-    _rounded(surf, pygame.Rect(0, 0, w, h), (12, 12, 16), 10)
-    _rounded(surf, pygame.Rect(2, 2, w - 4, h - 4), (30, 70, 40), 9)
-    _rounded(surf, pygame.Rect(8, 10, w - 16, h - 20), (40, 95, 55), 7)
-    font = pygame.font.SysFont("Segoe UI", max(12, h // 8), bold=True)
-    t = font.render("LAN", True, (220, 240, 220))
-    surf.blit(t, t.get_rect(center=(w // 2, h // 2)))
-    _back_cache[key] = surf
-    return surf
+    return card_art.render_standard_back(w, h, theme="green")
 
 
 class CribbageMatch:

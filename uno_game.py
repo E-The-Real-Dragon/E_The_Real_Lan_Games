@@ -15,18 +15,15 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pygame
 
+import card_art
+
 # ---- Layout (matches main window 920x720) ----
 WIDTH, HEIGHT = 920, 720
-CARD_W, CARD_H = 78, 118
-CARD_W_SM, CARD_H_SM = 56, 84
+CARD_W, CARD_H = card_art.STD_W, card_art.STD_H
+CARD_W_SM, CARD_H_SM = card_art.SM_W, card_art.SM_H
 
 COLORS = ("R", "Y", "G", "B")
-COLOR_RGB = {
-    "R": (210, 45, 45),
-    "Y": (230, 190, 30),
-    "G": (40, 160, 70),
-    "B": (40, 100, 210),
-}
+COLOR_RGB = card_art.UNO_RGB
 COLOR_NAME = {"R": "Red", "Y": "Yellow", "G": "Green", "B": "Blue"}
 
 # Kinds: 0-9, skip, reverse, draw2, wild, wild4
@@ -87,112 +84,13 @@ def build_deck() -> List[Card]:
     return cards
 
 
-# ---- Surface cache ----
-_face_cache: Dict[Tuple[Any, ...], pygame.Surface] = {}
-_back_cache: Dict[Tuple[int, int], pygame.Surface] = {}
-
-
-def _rounded_rect(surf: pygame.Surface, rect: pygame.Rect, color, radius: int = 10):
-    pygame.draw.rect(surf, color, rect, border_radius=radius)
-
-
 def render_card_face(card: Card, w: int = CARD_W, h: int = CARD_H) -> pygame.Surface:
-    key = (card.cid, card.color, card.kind, w, h, "v2")
-    if key in _face_cache:
-        return _face_cache[key]
-
-    surf = pygame.Surface((w, h), pygame.SRCALPHA)
-    # Soft shadow + plastic edge (cleaner than flat 8-bit blocks)
-    sh = pygame.Surface((w, h), pygame.SRCALPHA)
-    _rounded_rect(sh, pygame.Rect(3, 4, w - 3, h - 3), (0, 0, 0), 12)
-    sh.set_alpha(55)
-    surf.blit(sh, (0, 0))
-    _rounded_rect(surf, pygame.Rect(0, 0, w - 1, h - 1), (30, 32, 40), 12)
-    _rounded_rect(surf, pygame.Rect(2, 2, w - 5, h - 5), (250, 248, 242), 11)
-    for yy in range(5, h - 6):
-        t = (yy - 5) / max(1, h - 12)
-        col = (int(250 - t * 8), int(248 - t * 8), int(242 - t * 10))
-        pygame.draw.line(surf, col, (8, yy), (w - 9, yy))
-
-    # Color oval / wild multicolor
-    cx, cy = w // 2, h // 2
-    oval = pygame.Rect(10, 18, w - 20, h - 36)
-    if card.is_wild():
-        pygame.draw.polygon(surf, COLOR_RGB["R"], [(cx, cy), (cx, 18), (w - 10, cy)])
-        pygame.draw.polygon(surf, COLOR_RGB["Y"], [(cx, cy), (cx, 18), (10, cy)])
-        pygame.draw.polygon(surf, COLOR_RGB["G"], [(cx, cy), (cx, h - 18), (w - 10, cy)])
-        pygame.draw.polygon(surf, COLOR_RGB["B"], [(cx, cy), (cx, h - 18), (10, cy)])
-        pygame.draw.ellipse(surf, (248, 246, 240), pygame.Rect(cx - 18, cy - 22, 36, 44))
-    else:
-        col = COLOR_RGB.get(card.color or "R", (180, 180, 180))
-        pygame.draw.ellipse(surf, col, oval)
-        hi = pygame.Rect(oval.x + 8, oval.y + 6, oval.w - 16, oval.h // 3)
-        pygame.draw.ellipse(surf, tuple(min(255, c + 45) for c in col), hi)
-        # rim for depth
-        pygame.draw.ellipse(surf, tuple(max(0, c - 40) for c in col), oval, width=2)
-
-    # Text
-    font_big = pygame.font.SysFont("Segoe UI", max(18, h // 4), bold=True)
-    font_sm = pygame.font.SysFont("Segoe UI", max(12, h // 7), bold=True)
-    label = card.label()
-    text_col = (25, 25, 30) if card.kind == "Y" or (card.color == "Y") else (255, 255, 255)
-    if card.is_wild():
-        text_col = (30, 30, 35)
-
-    if card.kind in ("skip", "reverse"):
-        # Symbol-ish
-        if card.kind == "skip":
-            # Circle with slash
-            pygame.draw.circle(surf, text_col, (cx, cy), h // 7, width=3)
-            pygame.draw.line(surf, text_col, (cx - h // 9, cy + h // 9), (cx + h // 9, cy - h // 9), 3)
-        else:
-            # Two curved arrows approximated as arcs + heads
-            pygame.draw.arc(surf, text_col, pygame.Rect(cx - 16, cy - 14, 28, 28), 0.4, 2.8, 3)
-            pygame.draw.arc(surf, text_col, pygame.Rect(cx - 12, cy - 10, 28, 28), 3.5, 5.9, 3)
-            pygame.draw.polygon(surf, text_col, [(cx + 14, cy - 10), (cx + 6, cy - 16), (cx + 8, cy - 4)])
-            pygame.draw.polygon(surf, text_col, [(cx - 14, cy + 10), (cx - 6, cy + 16), (cx - 8, cy + 4)])
-    else:
-        img = font_big.render(label, True, text_col)
-        surf.blit(img, img.get_rect(center=(cx, cy)))
-
-    # Corner pips
-    pip = font_sm.render(label if len(label) <= 3 else label[:2], True, COLOR_RGB.get(card.color or "R", (80, 80, 80)) if not card.is_wild() else (80, 80, 90))
-    if card.is_wild():
-        pip = font_sm.render(label[:2], True, (60, 60, 70))
-    surf.blit(pip, (8, 6))
-    pip2 = pygame.transform.rotate(pip, 180)
-    surf.blit(pip2, (w - pip2.get_width() - 8, h - pip2.get_height() - 6))
-
-    # Gloss
-    gloss = pygame.Surface((w - 10, h // 4), pygame.SRCALPHA)
-    gloss.fill((255, 255, 255, 35))
-    surf.blit(gloss, (5, 6))
-
-    _face_cache[key] = surf
-    return surf
+    """Realistic glossy plastic UNO-style card (original art)."""
+    return card_art.render_uno_face(card.color, card.kind, card.label(), w, h)
 
 
 def render_card_back(w: int = CARD_W, h: int = CARD_H) -> pygame.Surface:
-    key = (w, h)
-    if key in _back_cache:
-        return _back_cache[key]
-    surf = pygame.Surface((w, h), pygame.SRCALPHA)
-    _rounded_rect(surf, pygame.Rect(0, 0, w, h), (15, 15, 20), 12)
-    _rounded_rect(surf, pygame.Rect(2, 2, w - 4, h - 4), (25, 55, 120), 11)
-    _rounded_rect(surf, pygame.Rect(8, 10, w - 16, h - 20), (35, 70, 145), 8)
-    # Pattern
-    for i in range(4):
-        for j in range(5):
-            x = 14 + i * ((w - 28) // 3)
-            y = 16 + j * ((h - 32) // 4)
-            pygame.draw.circle(surf, (50, 95, 175), (x, y), 3)
-    font = pygame.font.SysFont("Segoe UI", max(14, h // 7), bold=True)
-    t = font.render("LAN", True, (220, 230, 255))
-    surf.blit(t, t.get_rect(center=(w // 2, h // 2 - 8)))
-    t2 = font.render("UNO", True, (255, 220, 80))
-    surf.blit(t2, t2.get_rect(center=(w // 2, h // 2 + 12)))
-    _back_cache[key] = surf
-    return surf
+    return card_art.render_uno_back(w, h)
 
 
 class UnoMatch:
