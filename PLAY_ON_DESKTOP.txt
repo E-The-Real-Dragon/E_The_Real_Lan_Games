@@ -1,0 +1,31 @@
+E THE REAL LAN GAMES — HOW TO PLAY (NO CODING NEEDED)
+======================================================
+
+DESKTOP FOLDER
+--------------
+After a build, your playable game lives here:
+
+  Desktop\E_The_Real_Lan_Games\
+    E_The_Real_Lan_Games.exe   <-- double-click this
+    _internal\                 <-- leave this folder alone
+    README.txt                 <-- full instructions
+
+Copy the ENTIRE folder to another household PC to play together.
+
+HOST (your PC)
+--------------
+1. Double-click E_The_Real_Lan_Games.exe
+2. Host Game → pick colors → Start Hosting
+3. Tell the other player the IP shown on screen
+
+GUEST
+-----
+1. Run the same .exe from a copy of this folder
+2. Join Game → type the host IP → Connect
+
+Both PCs must be on the same home Wi-Fi.
+
+SOURCE CODE (for Grok Build / GitHub)
+-------------------------------------
+  C:\Users\rlaba\E_The_Real_Lan_Games\
+  https://github.com/E-The-Real-Dragon/E_The_Real_Lan_Games  (private)
