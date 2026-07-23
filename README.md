@@ -10,10 +10,20 @@ No internet required after install. Host on one PC, join from another on the sam
 | Game | Status |
 |------|--------|
 | **Checkers** | Fully playable over LAN |
-| UNO | Coming soon |
+| **UNO** | Fully playable over LAN (private hands, drag-to-play) |
 | Chess | Coming soon |
 | Othello | Coming soon |
 | Tic Tac Toe | Coming soon |
+
+### UNO how to play
+
+1. Host selects **UNO** → Host Game → Start Hosting (share your IP).
+2. Guest joins with that IP.
+3. **You only see your own cards** at the bottom. Opponent cards are face-down on top.
+4. **Drag** a highlighted (legal) card onto the **DISCARD** pile in the middle.
+5. Or **click DRAW** to take a card (if playable, you may play it or press **Pass**).
+6. After a Wild / Wild +4, pick a color on the overlay.
+7. Press **UNO!** when you have one card. Opponent can press **Catch UNO** if you forget.
 
 ## How to play (desktop .exe)
 
@@ -83,7 +93,8 @@ Output appears under `dist/E_The_Real_Lan_Games/`. Copy that whole folder to the
 
 ```text
 E_The_Real_Lan_Games/
-  main.py                      # App + Checkers + LAN networking
+  main.py                      # App hub + Checkers + LAN networking
+  uno_game.py                  # UNO rules, private hands, card art, drag-drop UI
   requirements.txt
   E_The_Real_Lan_Games.spec    # PyInstaller recipe
   README.md

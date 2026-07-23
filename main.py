@@ -17,6 +17,8 @@ import time
 import sys
 from typing import Optional, Tuple, List, Dict, Any
 
+import uno_game
+
 # ----------------------------- CONFIG -----------------------------
 WIDTH, HEIGHT = 920, 720
 BOARD_X, BOARD_Y = 40, 80
@@ -49,12 +51,14 @@ PALETTE: List[Tuple[str, Tuple[int, int, int]]] = [
 # ----------------------------- GAME SELECTION -----------------------------
 AVAILABLE_GAMES: List[Dict[str, Any]] = [
     {"id": "checkers", "label": "Checkers", "enabled": True},
-    {"id": "uno", "label": "UNO", "enabled": False},
+    {"id": "uno", "label": "UNO", "enabled": True},
     {"id": "chess", "label": "Chess", "enabled": False},
     {"id": "othello", "label": "Othello", "enabled": False},
     {"id": "tic_tac_toe", "label": "Tic Tac Toe", "enabled": False},
     {"id": None, "label": "More to come...", "enabled": False},
 ]
+
+PLAYABLE_GAMES = {"checkers", "uno"}
 
 # ----------------------------- GAME LOGIC -----------------------------
 def new_board() -> List[List[Optional[Tuple[int, bool]]]]:
@@ -334,19 +338,60 @@ def main():
     checkbox_rect = pygame.Rect(0, 0, 0, 0)
     input_active = False
 
-    selected_game = "checkers"  # default; only "checkers" is fully implemented today
+    selected_game = "checkers"  # "checkers" or "uno" (and future games)
+
+    # UNO match state (host is authoritative; client mirrors snapshots)
+    uno_match: Optional[uno_game.UnoMatch] = None
+    uno_view: Optional[uno_game.UnoView] = None
 
     buttons: List[Tuple[pygame.Rect, str]] = []  # (rect, id) for current screen
     game_selections: List[Tuple[pygame.Rect, Optional[str]]] = []  # (rect, game_id) populated by draw_main_menu
 
     def reset_game_state():
         nonlocal board, selected, legal_actions, jump_chain_active, current_player, winner
+        nonlocal uno_match, uno_view
         board = new_board()
         selected = None
         legal_actions = []
         jump_chain_active = False
         current_player = 0
         winner = None
+        uno_match = None
+        uno_view = None
+
+    def start_uno_match_host():
+        nonlocal uno_match, uno_view, winner
+        uno_match = uno_game.UnoMatch()
+        uno_match.start_new_game()
+        uno_view = uno_game.UnoView(match=uno_match, my_player=0, is_host=True)
+        winner = None
+
+    def push_uno_states():
+        """Host: refresh local view + send private snapshot to client."""
+        nonlocal winner, screen_name
+        if not is_host or uno_match is None:
+            return
+        if uno_match.winner is not None:
+            winner = uno_match.winner
+            screen_name = "gameover"
+        if sock:
+            send_msg(sock, uno_match.state_for(1))
+
+    def apply_uno_action(player: int, action: Dict[str, Any]) -> bool:
+        nonlocal winner, screen_name
+        if uno_match is None or not is_host:
+            return False
+        if action.get("action") == "menu":
+            return False
+        changed = uno_game.process_host_action(uno_match, player, action)
+        if changed:
+            if uno_match.winner is not None:
+                winner = uno_match.winner
+                screen_name = "gameover"
+                if sock:
+                    send_msg(sock, {"type": "game_over", "winner": winner, "game": "uno"})
+            push_uno_states()
+        return changed
 
     def start_hosting():
         nonlocal server_sock, sock, screen_name, is_host, my_player, last_net_error
@@ -367,7 +412,7 @@ def main():
             screen_name = "host_setup"
 
     def do_connect():
-        nonlocal sock, screen_name, connecting, last_net_error, net_buffer
+        nonlocal sock, screen_name, connecting, last_net_error, net_buffer, is_host, my_player
         last_net_error = ""
         net_buffer.clear()
         try:
@@ -377,10 +422,12 @@ def main():
             sock.setblocking(False)
             err = sock.connect_ex((connect_ip.strip(), PORT))
             connecting = True
+            is_host = False
+            my_player = 1
             screen_name = "joining"
             if err == 0:
-                # immediate
-                on_client_connected()
+                # Connected immediately — wait for host settings (do not run host setup)
+                connecting = False
         except Exception as e:
             last_net_error = str(e)
             connecting = False
@@ -388,13 +435,26 @@ def main():
 
     def on_client_connected():
         nonlocal screen_name, sock, is_host, my_player, colors, force_jumps
+        nonlocal uno_match, uno_view, selected_game
         # Client just connected to us (host)
         if is_host and sock is None:
             # accept happened in loop
             pass
         screen_name = "playing"
+        if selected_game == "uno":
+            start_uno_match_host()
+            if is_host and sock:
+                payload = {
+                    "type": "settings",
+                    "game": "uno",
+                    "you_are": 1,
+                }
+                send_msg(sock, payload)
+                push_uno_states()
+            return
+
         reset_game_state()
-        # send settings to client
+        # send settings to client (checkers)
         if is_host and sock:
             payload = {
                 "type": "settings",
@@ -408,17 +468,24 @@ def main():
             recompute_legals()
 
     def on_settings_received(msg: Dict):
-        nonlocal colors, force_jumps, my_player, screen_name
-        # Future-proof: which game the host started (currently always "checkers")
-        _game = msg.get("game", "checkers")
+        nonlocal colors, force_jumps, my_player, screen_name, selected_game
+        nonlocal uno_match, uno_view
+        selected_game = msg.get("game", "checkers")
+        my_player = msg.get("you_are", 1)
+        screen_name = "playing"
+
+        if selected_game == "uno":
+            uno_match = uno_game.UnoMatch()
+            uno_view = uno_game.UnoView(match=uno_match, my_player=my_player, is_host=False)
+            # Full snapshot arrives as uno_state right after settings
+            return
+
         cols = msg.get("colors", {})
         if "0" in cols:
             colors[0] = tuple(cols["0"])
         if "1" in cols:
             colors[1] = tuple(cols["1"])
         force_jumps = bool(msg.get("force_jumps", True))
-        my_player = msg.get("you_are", 1)
-        screen_name = "playing"
         reset_game_state()
         recompute_legals()
 
@@ -541,9 +608,22 @@ def main():
 
     def handle_net_message(msg: Dict[str, Any]):
         nonlocal sock, server_sock, screen_name, winner, last_net_error, current_player, selected, legal_actions
+        nonlocal uno_match, uno_view, selected_game
         mtype = msg.get("type")
         if mtype == "settings":
             on_settings_received(msg)
+        elif mtype == "uno_state":
+            if uno_view is None:
+                uno_match = uno_game.UnoMatch()
+                uno_view = uno_game.UnoView(match=uno_match, my_player=my_player, is_host=is_host)
+            uno_view.sync_from_state_msg(msg)
+            if msg.get("winner") is not None:
+                winner = msg.get("winner")
+                screen_name = "gameover"
+        elif mtype == "uno_action":
+            # Client -> host action request
+            if is_host and uno_match is not None:
+                apply_uno_action(1, msg)
         elif mtype == "move":
             fr = tuple(msg.get("from", [0, 0]))
             to = tuple(msg.get("to", [0, 0]))
@@ -601,6 +681,8 @@ def main():
         elif mtype == "game_over":
             winner = msg.get("winner", 0)
             screen_name = "gameover"
+            if uno_match is not None:
+                uno_match.winner = winner
 
     def poll_network():
         nonlocal sock, server_sock, connecting, last_net_error, screen_name, net_buffer
@@ -650,10 +732,10 @@ def main():
                     screen_name = "join_setup"
                 elif sock in w:
                     connecting = False
-                    # success
-                    screen_name = "playing"
-                    # We are client, wait for settings from host
-                    # (host will send immediately on accept)
+                    # Connected — wait for settings from host before showing a game board
+                    screen_name = "joining"
+                    last_net_error = ""
+                    # Host will send settings + (for UNO) state snapshots immediately
             except Exception as e:
                 last_net_error = str(e)
                 connecting = False
@@ -737,16 +819,17 @@ def main():
         bw, bh = 310, 52
 
         # Selection status
-        if selected_game == "checkers":
-            status = "Checkers selected — full LAN support"
+        if selected_game in PLAYABLE_GAMES:
+            labels = {"checkers": "Checkers", "uno": "UNO"}
+            status = f"{labels.get(selected_game, selected_game)} selected — full LAN support"
             status_col = (70, 200, 110)
         else:
-            status = "Only Checkers can be hosted right now"
+            status = "That game is not ready yet — pick Checkers or UNO"
             status_col = (200, 190, 100)
         draw_text(screen, font_med, status, action_x, y - 18, status_col)
 
-        # Host (only functional for checkers right now)
-        host_enabled = (selected_game == "checkers")
+        # Host (Checkers + UNO)
+        host_enabled = (selected_game in PLAYABLE_GAMES)
         host_bg = (55, 120, 80) if host_enabled else (65, 75, 70)
         host_rect = pygame.Rect(action_x, y, bw, bh)
         draw_button(screen, font_big, host_rect, "Host Game", host_bg)
@@ -768,7 +851,7 @@ def main():
 
         # Helpful footer
         draw_text(screen, font_small, "Click a game on the left to select it.", WIDTH // 2, HEIGHT - 92, (155, 155, 160), center=True)
-        draw_text(screen, font_small, "Checkers is ready for LAN play. Chess, Othello, and Tic Tac Toe will be added soon!", WIDTH // 2, HEIGHT - 70, (130, 130, 135), center=True)
+        draw_text(screen, font_small, "Checkers and UNO are ready for LAN play. More games coming soon!", WIDTH // 2, HEIGHT - 70, (130, 130, 135), center=True)
 
         if last_net_error:
             draw_text(screen, font_small, last_net_error, WIDTH // 2, HEIGHT - 42, (220, 90, 90), center=True)
@@ -786,7 +869,31 @@ def main():
                 break
         draw_text(screen, font_med, f"Game: {game_label}", WIDTH // 2, 95, (120, 200, 140), center=True)
 
-        # Color pickers
+        if selected_game == "uno":
+            draw_text(screen, font_big, "LAN UNO — 2 players", WIDTH // 2, 180, WHITE, center=True)
+            lines = [
+                "Each player only sees their own cards.",
+                "Drag a card onto the discard pile to play.",
+                "Click the draw pile if you cannot (or choose not to) play.",
+                "Wild cards: pick a color after playing.",
+                "Host deals and is the rules authority.",
+            ]
+            yy = 230
+            for line in lines:
+                draw_text(screen, font_med, line, WIDTH // 2, yy, (190, 195, 200), center=True)
+                yy += 32
+            bw, bh = 260, 50
+            start_rect = pygame.Rect((WIDTH - bw) // 2, 430, bw, bh)
+            draw_button(screen, font_big, start_rect, "Start Hosting", (40, 130, 70))
+            buttons.append((start_rect, "start_host"))
+            back_rect = pygame.Rect((WIDTH - bw) // 2, 500, bw, bh)
+            draw_button(screen, font_big, back_rect, "Back", (90, 90, 95))
+            buttons.append((back_rect, "back"))
+            if last_net_error:
+                draw_text(screen, font_small, last_net_error, WIDTH // 2, 580, (220, 80, 80), center=True)
+            return
+
+        # Color pickers (Checkers)
         draw_text(screen, font_big, "Your color (bottom)", 120, 120, WHITE)
         sw = 58
         for i, (name, rgb) in enumerate(PALETTE):
@@ -873,8 +980,12 @@ def main():
 
     def draw_joining_screen():
         screen.fill(BG)
-        draw_text(screen, font_title, "Connecting...", WIDTH // 2, 180, WHITE, center=True)
-        draw_text(screen, font_med, f"To {connect_ip}:{PORT}", WIDTH // 2, 240, (180, 200, 220), center=True)
+        if sock and not connecting:
+            draw_text(screen, font_title, "Connected!", WIDTH // 2, 180, WHITE, center=True)
+            draw_text(screen, font_med, "Waiting for host to start the game...", WIDTH // 2, 240, (180, 200, 220), center=True)
+        else:
+            draw_text(screen, font_title, "Connecting...", WIDTH // 2, 180, WHITE, center=True)
+            draw_text(screen, font_med, f"To {connect_ip}:{PORT}", WIDTH // 2, 240, (180, 200, 220), center=True)
 
         bw, bh = 220, 46
         cancel = pygame.Rect((WIDTH - bw) // 2, 340, bw, bh)
@@ -994,17 +1105,17 @@ def main():
                     for rect, gid in game_selections:
                         if rect.collidepoint(mx, my) and gid:
                             selected_game = gid
-                            last_net_error = ""  # clear any previous "only checkers" message
+                            last_net_error = ""  # clear any previous message
                             break
 
                     # Action buttons (right side)
                     for rect, bid in buttons:
                         if rect.collidepoint(mx, my):
                             if bid == "host":
-                                if selected_game == "checkers":
+                                if selected_game in PLAYABLE_GAMES:
                                     screen_name = "host_setup"
                                 else:
-                                    last_net_error = "Select Checkers to host a game (other games coming soon)"
+                                    last_net_error = "Select Checkers or UNO to host (other games coming soon)"
                             elif bid == "join":
                                 screen_name = "join_setup"
                                 input_active = False
@@ -1012,32 +1123,33 @@ def main():
                                 running = False
 
                 elif screen_name == "host_setup":
-                    # color swatches
-                    sw = 58
-                    for i in range(len(PALETTE)):
-                        x = 80 + i * (sw + 18)
-                        if pygame.Rect(x, 150, sw, sw + 20).collidepoint(mx, my):
-                            host_color_idx = i
-                            colors[0] = PALETTE[i][1]
-                            if host_color_idx == opp_color_idx:
-                                opp_color_idx = (opp_color_idx + 1) % len(PALETTE)
-                                colors[1] = PALETTE[opp_color_idx][1]
-                        if pygame.Rect(x, 280, sw, sw + 20).collidepoint(mx, my):
-                            opp_color_idx = i
-                            colors[1] = PALETTE[i][1]
-                            if opp_color_idx == host_color_idx:
-                                host_color_idx = (host_color_idx + 1) % len(PALETTE)
-                                colors[0] = PALETTE[host_color_idx][1]
-                    # checkbox
-                    if checkbox_rect.collidepoint(mx, my):
-                        force_jumps = not force_jumps
+                    if selected_game == "checkers":
+                        # color swatches
+                        sw = 58
+                        for i in range(len(PALETTE)):
+                            x = 80 + i * (sw + 18)
+                            if pygame.Rect(x, 150, sw, sw + 20).collidepoint(mx, my):
+                                host_color_idx = i
+                                colors[0] = PALETTE[i][1]
+                                if host_color_idx == opp_color_idx:
+                                    opp_color_idx = (opp_color_idx + 1) % len(PALETTE)
+                                    colors[1] = PALETTE[opp_color_idx][1]
+                            if pygame.Rect(x, 280, sw, sw + 20).collidepoint(mx, my):
+                                opp_color_idx = i
+                                colors[1] = PALETTE[i][1]
+                                if opp_color_idx == host_color_idx:
+                                    host_color_idx = (host_color_idx + 1) % len(PALETTE)
+                                    colors[0] = PALETTE[host_color_idx][1]
+                        # checkbox
+                        if checkbox_rect.collidepoint(mx, my):
+                            force_jumps = not force_jumps
                     # buttons
                     for rect, bid in buttons:
                         if rect.collidepoint(mx, my):
                             if bid == "start_host":
-                                # apply chosen colors
-                                colors[0] = PALETTE[host_color_idx][1]
-                                colors[1] = PALETTE[opp_color_idx][1]
+                                if selected_game == "checkers":
+                                    colors[0] = PALETTE[host_color_idx][1]
+                                    colors[1] = PALETTE[opp_color_idx][1]
                                 start_hosting()
                             elif bid == "back":
                                 screen_name = "main_menu"
@@ -1057,16 +1169,31 @@ def main():
                                 input_active = False
 
                 elif screen_name == "playing":
-                    for rect, bid in buttons:
-                        if rect.collidepoint(mx, my):
-                            if bid == "menu":
+                    if selected_game == "uno" and uno_view is not None:
+                        action = uno_view.handle_mouse_down((mx, my))
+                        if action:
+                            if action.get("action") == "menu":
                                 cleanup_net()
                                 screen_name = "main_menu"
                                 reset_game_state()
-                            elif bid == "end_turn":
-                                if is_my_turn() and selected is not None and (jump_chain_active or not force_jumps):
-                                    end_turn_sequence()
-                    handle_click_play(mx, my)
+                            elif is_host:
+                                apply_uno_action(my_player, action)
+                            else:
+                                if sock:
+                                    payload = dict(action)
+                                    payload["type"] = "uno_action"
+                                    send_msg(sock, payload)
+                    else:
+                        for rect, bid in buttons:
+                            if rect.collidepoint(mx, my):
+                                if bid == "menu":
+                                    cleanup_net()
+                                    screen_name = "main_menu"
+                                    reset_game_state()
+                                elif bid == "end_turn":
+                                    if is_my_turn() and selected is not None and (jump_chain_active or not force_jumps):
+                                        end_turn_sequence()
+                        handle_click_play(mx, my)
 
                 elif screen_name == "hosting":
                     for rect, bid in buttons:
@@ -1090,6 +1217,18 @@ def main():
                             elif bid == "quit":
                                 running = False
 
+            elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                if screen_name == "playing" and selected_game == "uno" and uno_view is not None:
+                    action = uno_view.handle_mouse_up((mx, my))
+                    if action:
+                        if is_host:
+                            apply_uno_action(my_player, action)
+                        else:
+                            if sock:
+                                payload = dict(action)
+                                payload["type"] = "uno_action"
+                                send_msg(sock, payload)
+
             elif event.type == pygame.KEYDOWN:
                 if screen_name == "join_setup" and input_active:
                     if event.key == pygame.K_RETURN:
@@ -1104,13 +1243,14 @@ def main():
                             connect_ip += ch
 
             elif event.type == pygame.MOUSEMOTION:
-                pass  # hover computed below
+                if screen_name == "playing" and selected_game == "uno" and uno_view is not None:
+                    uno_view.handle_mouse_motion((mx, my))
 
         # Network polling every frame
         poll_network()
 
         # Recompute legals at start of turn if needed (after net moves)
-        if screen_name == "playing" and not selected and not legal_actions:
+        if screen_name == "playing" and selected_game == "checkers" and not selected and not legal_actions:
             legal_actions, _ = get_all_legal_actions(board, current_player, force_jumps)
             jump_chain_active = False
 
@@ -1127,9 +1267,32 @@ def main():
         elif screen_name == "joining":
             draw_joining_screen()
         elif screen_name == "playing":
-            draw_play_screen()
+            if selected_game == "uno" and uno_view is not None:
+                uno_view.draw(screen)
+            elif selected_game == "uno":
+                screen.fill((28, 70, 48))
+                draw_text(screen, font_big, "Starting UNO...", WIDTH // 2, HEIGHT // 2, WHITE, center=True)
+            else:
+                draw_play_screen()
         elif screen_name == "gameover":
-            draw_gameover_screen()
+            if selected_game == "uno" and uno_view is not None:
+                uno_view.draw(screen)
+                # Overlay win buttons (reuse checkers gameover buttons layout lightly)
+                ov = pygame.Rect(WIDTH // 2 - 200, 140, 400, 200)
+                pygame.draw.rect(screen, (35, 38, 45), ov, border_radius=12)
+                pygame.draw.rect(screen, (80, 80, 90), ov, width=2, border_radius=12)
+                you_won = (winner == my_player)
+                title = "YOU WIN!" if you_won else "OPPONENT WINS"
+                tcol = (80, 220, 100) if you_won else (220, 90, 90)
+                draw_text(screen, font_title, title, WIDTH // 2, 195, tcol, center=True)
+                bw, bh = 180, 46
+                again = pygame.Rect(WIDTH // 2 - bw - 12, 250, bw, bh)
+                menu = pygame.Rect(WIDTH // 2 + 12, 250, bw, bh)
+                draw_button(screen, font_med, again, "Back to Menu", (60, 110, 160))
+                draw_button(screen, font_med, menu, "Quit", (140, 60, 60))
+                buttons = [(again, "back_menu"), (menu, "quit")]
+            else:
+                draw_gameover_screen()
 
         # Hover effect for buttons (simple visual)
         for rect, _ in buttons:
