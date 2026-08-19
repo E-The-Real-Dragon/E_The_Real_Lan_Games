@@ -3,7 +3,7 @@
 Private household multiplayer games over your home Wi‑Fi.  
 No internet required after install. Host on one PC, join from another on the same network.
 
-**GitHub (private):** https://github.com/E-The-Real-Dragon/E_The_Real_Lan_Games
+**GitHub:** https://github.com/E-The-Real-Dragon/E_The_Real_Lan_Games
 
 ## Playable now
 
@@ -114,10 +114,8 @@ E_The_Real_Lan_Games/
   .gitignore
 ```
 
-## Privacy
-
-This repository is **private**. It is intended for household use and easy backup/edits, not public distribution.
-
 ## License
 
-MIT — see [LICENSE](LICENSE).
+**E_The_Real Source-Available License 1.0** (not MIT/GPL).
+
+You may view, copy, and tweak this project for yourself. You may **not** publish or distribute a modified version without written consent from E_The_Real. See [LICENSE](LICENSE).
